@@ -6,10 +6,10 @@ Can be run manually or via cron job
 import requests
 import sys
 from datetime import datetime
-from scrapers.walmart_scraper import WalmartScraper
+from walmart_scraper import WalmartScraper
 
 # Configuration
-API_URL = "http://localhost:5000"  # Change to your deployed URL
+API_URL = "https://postgres-production-18e7.up.railway.app"  # Change to your deployed URL
 
 
 def upload_deals(deals, api_url):
