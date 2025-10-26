@@ -2,6 +2,8 @@ from flask import Flask, jsonify, request
 from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime, timedelta
 import os
+from apscheduler.schedulers.background import BackgroundScheduler
+import atexit
 
 app = Flask(__name__)
 
@@ -202,7 +204,85 @@ def cleanup_old_deals():
     db.session.commit()
     return jsonify({'success': True, 'deleted_count': deleted})
 
+
+def scheduled_scraper():
+    """Automatically run scraper daily"""
+    print("=" * 60)
+    print(f"🔄 Running scheduled scraper at {datetime.utcnow()}")
+    print("=" * 60)
+
+    try:
+        # Import here to avoid circular imports
+        from scrapers.walmart_scraper import WalmartScraper
+
+        scraper = WalmartScraper()
+        deals = scraper.scrape_deals()
+
+        print(f"📦 Scraped {len(deals)} deals")
+
+        if deals:
+            # Add deals to database
+            with app.app_context():
+                added = 0
+                for deal_data in deals:
+                    try:
+                        # Parse datetime strings
+                        if 'valid_from' in deal_data and isinstance(deal_data['valid_from'], str):
+                            deal_data['valid_from'] = datetime.fromisoformat(deal_data['valid_from'])
+                        if 'valid_until' in deal_data and isinstance(deal_data['valid_until'], str):
+                            deal_data['valid_until'] = datetime.fromisoformat(deal_data['valid_until'])
+
+                        # Check if deal exists
+                        existing = Deal.query.filter_by(
+                            store_name=deal_data.get('store_name'),
+                            product_name=deal_data.get('product_name')
+                        ).first()
+
+                        if existing:
+                            # Update existing
+                            for key, value in deal_data.items():
+                                setattr(existing, key, value)
+                            existing.updated_at = datetime.utcnow()
+                        else:
+                            # Create new
+                            deal = Deal(**deal_data)
+                            db.session.add(deal)
+
+                        added += 1
+                    except Exception as e:
+                        print(f"  ❌ Error adding deal: {e}")
+                        db.session.rollback()
+                        continue
+
+                db.session.commit()
+                print(f"✅ Scheduled scraper: {added} deals processed")
+
+    except Exception as e:
+        print(f"❌ Scheduled scraper failed: {e}")
+        import traceback
+        traceback.print_exc()
+
+
+# Initialize scheduler
+print("🕐 Setting up daily scraper schedule...")
+scheduler = BackgroundScheduler()
+
+# Run at 6 AM UTC every day
+scheduler.add_job(
+    func=scheduled_scraper,
+    trigger="cron",
+    hour=6,  # 6 AM UTC
+    minute=0,
+    id='daily_scraper'
+)
+
+# Start the scheduler
+scheduler.start()
+print(f"✅ Scheduler started! Next run: {scheduler.get_jobs()[0].next_run_time}")
+
+# Shut down scheduler gracefully on exit
+atexit.register(lambda: scheduler.shutdown())
+
 if __name__ == '__main__':
-    # Local dev only (Railway uses Gunicorn via Procfile)
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=True)
