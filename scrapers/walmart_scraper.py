@@ -23,136 +23,188 @@ class WalmartScraper:
 
     def scrape_deals(self, zip_code="10001"):
         """
-        Scrape Walmart deals
-        Returns list of deal dictionaries
+        Scrape Walmart deals from multiple deal pages (rollbacks, flash picks, clearance).
+        Returns a list of deal dicts.
         """
-        deals = []
+        all_deals = []
 
-        try:
-            # Walmart rollbacks page
-            url = f"{self.base_url}/shop/deals/rollbacks"
+        # Pages to scrape
+        deal_pages = [
+            f"{self.base_url}/shop/deals/rollbacks",
+            f"{self.base_url}/shop/deals/flash-picks",
+            f"{self.base_url}/shop/deals/clearance",
+        ]
 
-            print(f"Fetching Walmart deals from {url}...")
-            response = requests.get(url, headers=self.headers, timeout=15)
+        for url in deal_pages:
+            try:
+                print(f"\nFetching Walmart deals from {url}...")
+                response = requests.get(url, headers=self.headers, timeout=15)
+                print(f"Response status: {response.status_code}")
 
-            print(f"Response status: {response.status_code}")
+                if response.status_code != 200:
+                    print(f"❌ Failed to fetch page: {response.status_code}")
+                    continue
 
-            if response.status_code == 200:
                 soup = BeautifulSoup(response.content, 'html.parser')
 
-                # Find all product tiles
-                # Walmart uses different containers, let's try multiple approaches
+                # Try multiple strategies to grab product cards
+                # Strategy 1: find all product title elements directly
+                product_title_nodes = soup.find_all(attrs={'data-automation-id': 'product-title'})
+                # Strategy 2: fallback class you saw
+                if not product_title_nodes:
+                    product_title_nodes = soup.find_all('span', class_='w_V_DM')
 
-                # Method 1: Find by data-automation-id
-                products = soup.find_all(attrs={'data-automation-id': 'product-title'})
+                print(f"Found {len(product_title_nodes)} product elements")
 
-                if not products:
-                    # Method 2: Find spans with title info
-                    products = soup.find_all('span', class_='w_V_DM')
-
-                print(f"Found {len(products)} product elements")
-
-                for idx, product in enumerate(products[:30]):  # Limit to 30
+                # We'll walk each title node, then climb upward to find a "card" container
+                for idx, title_node in enumerate(product_title_nodes):
                     try:
-                        # Get the parent container (go up a few levels)
-                        container = product.parent
-                        for _ in range(5):  # Go up max 5 levels
-                            if container.parent:
+                        # Heuristic: climb up a few levels to get the full product card container
+                        container = title_node
+                        for _ in range(5):
+                            if container and container.parent:
                                 container = container.parent
 
-                        # Extract product name
+                        # ---------- NAME ----------
+                        name = None
                         title_elem = container.find(attrs={'data-automation-id': 'product-title'})
-                        if not title_elem:
-                            title_elem = container.find('span', class_='w_V_DM')
+                        if title_elem:
+                            name = title_elem.get_text(strip=True)
+                        else:
+                            fallback_title = container.find('span', class_='w_V_DM')
+                            if fallback_title:
+                                name = fallback_title.get_text(strip=True)
 
-                        if not title_elem:
+                        if not name:
+                            # if we can't even get a name, skip this card
                             continue
 
-                        name = title_elem.get_text(strip=True)
+                        # normalize whitespace
+                        name = " ".join(name.split())
 
-                        # Extract current price
-                        # Look for the "Now" price or any price element
-                        price_container = container.find(attrs={'data-automation-id': 'product-price'})
+                        # ---------- PRICE BLOCK ----------
+                        # Walmart shuffles class names, so we do defensive extraction.
 
                         current_price = None
                         original_price = None
                         savings = None
 
+                        # Look for something that looks like a price container
+                        price_container = None
+
+                        # first try with data-automation-id they sometimes use
+                        price_container = container.find(attrs={'data-automation-id': 'product-price'})
+                        if not price_container:
+                            # fallback: look for any element with a $ in it
+                            # but still within reasonable depth of container
+                            # (keeps us from scanning entire soup)
+                            possible_prices = container.find_all(string=re.compile(r"\$\s*\d"))
+                            if possible_prices:
+                                # grab the first parent tag of a "$12" style string
+                                price_container = possible_prices[0].parent
+
+                        # Now parse current / original / savings from price_container
                         if price_container:
-                            # Find the big price number (class f2 or f3)
-                            price_elem = price_container.find('span', class_='f2')
-                            if not price_elem:
-                                price_elem = price_container.find('span', class_='f3')
+                            # Walmart often splits dollars and cents into siblings.
+                            # We'll try to reconstruct like $12.34
 
-                            if price_elem:
-                                # Get the cents too
-                                price_text = price_elem.get_text(strip=True)
-                                # Look for decimal part
-                                cents_elem = price_elem.find_next_sibling('span')
-                                if cents_elem:
-                                    cents_text = cents_elem.get_text(strip=True)
-                                    current_price = f"${price_text}.{cents_text}"
+                            # Find something that looks like the main dollars value
+                            # (you were checking class_='f2'/'f3'; keep that, but also add fallback)
+                            dollars_node = (
+                                    price_container.find('span', class_='f2')
+                                    or price_container.find('span', class_='f3')
+                            )
+                            cents_node = None
+
+                            if dollars_node:
+                                # cents sometimes is literally the next sibling <span> with 2 digits
+                                nxt = dollars_node.find_next_sibling('span')
+                                if nxt and re.match(r"^\d{2}$", nxt.get_text(strip=True)):
+                                    cents_node = nxt
+
+                                dollars_text = dollars_node.get_text(strip=True)
+                                if cents_node:
+                                    cents_text = cents_node.get_text(strip=True)
+                                    current_price = f"${dollars_text}.{cents_text}"
                                 else:
-                                    current_price = f"${price_text}.00"
+                                    # if it already has decimals, keep it
+                                    if re.search(r"\d+\.\d{2}", dollars_text):
+                                        # already looks like 12.34
+                                        if dollars_text.startswith("$"):
+                                            current_price = dollars_text
+                                        else:
+                                            current_price = f"${dollars_text}"
+                                    else:
+                                        # assume whole dollars
+                                        if dollars_text.startswith("$"):
+                                            current_price = f"{dollars_text}.00"
+                                        else:
+                                            current_price = f"${dollars_text}.00"
 
-                            # Find original price (strikethrough)
+                            # original / strikethrough (rollback price before discount)
                             strike_elem = price_container.find('span', class_='strike')
                             if strike_elem:
                                 original_price = strike_elem.get_text(strip=True)
 
-                            # Find savings
-                            savings_text = container.get_text()
-                            if 'You save' in savings_text:
-                                # Extract the dollar amount after "You save"
-                                match = re.search(r'You save\s*\$?([\d,]+\.?\d*)', savings_text)
-                                if match:
-                                    savings = f"Save ${match.group(1)}"
+                            # savings text ("You save $5.00")
+                            # we'll just scan container text
+                            container_text = container.get_text(" ", strip=True)
+                            m = re.search(r"You save\s*\$?([\d,]+\.?\d*)", container_text, re.IGNORECASE)
+                            if m:
+                                savings = f"Save ${m.group(1)}"
 
-                        # Skip if we couldn't find a price
+                        # If we STILL didn't get a price, skip this card
                         if not current_price:
                             continue
 
-                        # Clean up the name (remove extra whitespace)
-                        name = ' '.join(name.split())
+                        # ---------- CATEGORY ----------
+                        category_guess = self._categorize_product(name)
 
-                        # Create deal object
+                        # ---------- IMAGE ----------
+                        # We try common patterns for imgs/thumbnails within the container
+                        image_url = None
+                        img_tag = container.find('img')
+                        if img_tag and img_tag.get('src'):
+                            image_url = img_tag['src']
+                        elif img_tag and img_tag.get('data-src'):
+                            image_url = img_tag['data-src']
+
+                        # ---------- BUILD DEAL OBJECT ----------
                         deal = {
                             'store_name': 'Walmart',
-                            'product_name': name[:200],  # Limit length
+                            'product_name': name[:200],
                             'price': current_price,
                             'original_price': original_price,
                             'discount': savings,
-                            'category': self._categorize_product(name),
+                            'category': category_guess,
                             'description': None,
-                            'image_url': None,
+                            'image_url': image_url,
                             'deal_url': url,
                             'valid_from': datetime.utcnow().isoformat(),
                             'valid_until': (datetime.utcnow() + timedelta(days=7)).isoformat()
                         }
 
-                        deals.append(deal)
+                        all_deals.append(deal)
                         print(f"  ✓ [{idx + 1}] {name[:50]}... : {current_price}")
 
                     except Exception as e:
-                        print(f"  ✗ Error parsing product {idx + 1}: {e}")
+                        print(f"  ✗ Error parsing product {idx + 1} on {url}: {e}")
+                        # keep going, just this item failed
                         continue
 
-                print(f"\n✅ Successfully scraped {len(deals)} deals")
+                print(f"✅ {len(all_deals)} total deals collected so far")
 
-            else:
-                print(f"❌ Failed to fetch page: {response.status_code}")
+            except Exception as e:
+                print(f"❌ Error scraping {url}: {e}")
+                # continue with the next URL
+                continue
 
-            # Fallback to sample data if scraping fails
-            if len(deals) == 0:
-                print("⚠️  No deals found with real scraping, using sample data")
-                deals = self._get_sample_deals()
+        # Fallback if we got absolutely nothing
+        if len(all_deals) == 0:
+            print("⚠️  No deals found across all pages, using sample data")
+            all_deals = self._get_sample_deals()
 
-        except Exception as e:
-            print(f"❌ Error scraping Walmart: {e}")
-            print("⚠️  Falling back to sample data")
-            deals = self._get_sample_deals()
-
-        return deals
+        return all_deals
 
     def _categorize_product(self, product_name):
         """Categorize product based on name"""

@@ -3,7 +3,7 @@ from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime, timedelta
 import os
 from apscheduler.schedulers.background import BackgroundScheduler
-from scrapers.run_scrapers import run_all_scrapers, API_URL
+from run_scrapers import run_all_scrapers
 import atexit
 
 app = Flask(__name__)
@@ -206,6 +206,12 @@ def cleanup_old_deals():
     return jsonify({'success': True, 'deleted_count': deleted})
 
 
+@app.route('/api/admin/trigger-scraper', methods=['GET'])
+def trigger_scraper():
+    """Manually trigger scraper for testing"""
+    scheduled_scraper()
+    return jsonify({'message': 'Scraper triggered! Check logs.'})
+
 def scheduled_scraper():
     """Automatically run ALL scrapers, then upload results to the API."""
     print("=" * 60)
@@ -213,7 +219,17 @@ def scheduled_scraper():
     print("=" * 60)
 
     try:
-        exit_code = run_all_scrapers(API_URL)
+        # Get the current Railway URL dynamically
+        api_url = os.environ.get('RAILWAY_PUBLIC_DOMAIN')
+        if api_url:
+            api_url = f"https://{api_url}"
+        else:
+            # Fallback to localhost for local testing
+            api_url = "http://localhost:5000"
+
+        print(f"📍 Using API URL: {api_url}")
+        exit_code = run_all_scrapers(api_url)
+
         if exit_code == 0:
             print("✅ scheduled_scraper: completed successfully")
         else:
@@ -222,24 +238,6 @@ def scheduled_scraper():
         print(f"❌ scheduled_scraper failed: {e}")
         import traceback
         traceback.print_exc()
-
-
-print("🕐 Setting up daily scraper schedule...")
-scheduler = BackgroundScheduler()
-
-# Run at 6 AM UTC every day
-scheduler.add_job(
-    func=scheduled_scraper,
-    trigger="cron",
-    hour=6,
-    minute=0,
-    id='daily_scraper'
-)
-
-scheduler.start()
-print(f"✅ Scheduler started! Next run: {scheduler.get_jobs()[0].next_run_time}")
-
-atexit.register(lambda: scheduler.shutdown())
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
