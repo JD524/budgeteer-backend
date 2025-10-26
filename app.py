@@ -239,22 +239,23 @@ def scheduled_scraper():
         import traceback
         traceback.print_exc()
 
-    print("Setting up daily scraper schedule...")
-    scheduler = BackgroundScheduler()
+print("Setting up daily scraper schedule...")
+scheduler = BackgroundScheduler()
 
-    # Run at 6 AM UTC every day
-    scheduler.add_job(
-        func=scheduled_scraper,
-        trigger="cron",
-        hour=6,
-        minute=0,
-        id='daily_scraper'
-    )
+# Run at 6 AM UTC every day
+scheduler.add_job(
+    func=scheduled_scraper,
+    trigger="cron",
+    hour=6,
+    minute=0,
+    id='daily_scraper'
+)
 
-    scheduler.start()
-    print(f"Scheduler started! Next run: {scheduler.get_jobs()[0].next_run_time}")
+scheduler.start()
+print(f"Scheduler started! Next run: {scheduler.get_jobs()[0].next_run_time}")
 
-    atexit.register(lambda: scheduler.shutdown())
+atexit.register(lambda: scheduler.shutdown())
+
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
