@@ -239,31 +239,37 @@ def trigger_scraper():
     return jsonify({'message': 'Scraper triggered! Check logs.'})
 
 def scheduled_scraper():
-    """Automatically run ALL scrapers, then upload results to the API."""
+    """Automatically run ALL scrapers (Walmart + Giant Eagle), then upload results to the API."""
     print("=" * 60)
     print(f"🔄 Running scheduled scraper at {datetime.utcnow()}")
     print("=" * 60)
 
     try:
-        # Get the current Railway URL dynamically
+        # Figure out which API URL to upload to.
+        # On Railway, RAILWAY_PUBLIC_DOMAIN will be like "web-production-...up.railway.app"
         api_url = os.environ.get('RAILWAY_PUBLIC_DOMAIN')
         if api_url:
+            # make sure it's a full https URL
             api_url = f"https://{api_url}"
         else:
-            # Fallback to localhost for local testing
+            # local fallback
             api_url = "http://localhost:5000"
 
         print(f"📍 Using API URL: {api_url}")
+
+        # Run scrapers + upload
         exit_code = run_all_scrapers(api_url)
 
         if exit_code == 0:
             print("✅ scheduled_scraper: completed successfully")
         else:
             print("⚠️ scheduled_scraper: completed but with upload issues / no deals")
+
     except Exception as e:
         print(f"❌ scheduled_scraper failed: {e}")
         import traceback
         traceback.print_exc()
+
 
 print("Setting up daily scraper schedule...")
 scheduler = BackgroundScheduler()
@@ -272,15 +278,17 @@ scheduler = BackgroundScheduler()
 scheduler.add_job(
     func=scheduled_scraper,
     trigger="cron",
-    hour=6,
-    minute=0,
+    hour=11,
+    minute=58,
     id='daily_scraper'
 )
 
 scheduler.start()
 print(f"Scheduler started! Next run: {scheduler.get_jobs()[0].next_run_time}")
 
+# Shut down scheduler gracefully on exit
 atexit.register(lambda: scheduler.shutdown())
+
 
 
 if __name__ == '__main__':
