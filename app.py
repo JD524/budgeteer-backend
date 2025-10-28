@@ -173,30 +173,64 @@ def bulk_add_deals():
     data = request.get_json()
     if not isinstance(data, list):
         return jsonify({'error': 'Expected array of deals'}), 400
+
+    # Only these keys are valid DB columns on Deal
+    allowed_fields = {
+        'store_name',
+        'product_name',
+        'price',
+        'original_price',
+        'discount',
+        'category',
+        'description',
+        'image_url',
+        'deal_url',
+        'valid_from',
+        'valid_until',
+    }
+
     added = 0
-    for deal_data in data:
+    for incoming in data:
         try:
+            # 1. Strip unknown keys like rating/reviews/badges/etc.
+            deal_data = {k: v for k, v in incoming.items() if k in allowed_fields}
+
+            # 2. Parse ISO strings into datetimes if provided
             if 'valid_from' in deal_data and isinstance(deal_data['valid_from'], str):
-                deal_data['valid_from'] = datetime.fromisoformat(deal_data['valid_from'])
+                try:
+                    deal_data['valid_from'] = datetime.fromisoformat(deal_data['valid_from'])
+                except Exception:
+                    deal_data['valid_from'] = None
+
             if 'valid_until' in deal_data and isinstance(deal_data['valid_until'], str):
-                deal_data['valid_until'] = datetime.fromisoformat(deal_data['valid_until'])
+                try:
+                    deal_data['valid_until'] = datetime.fromisoformat(deal_data['valid_until'])
+                except Exception:
+                    deal_data['valid_until'] = None
+
+            # 3. Upsert by (store_name, product_name)
             existing = Deal.query.filter_by(
                 store_name=deal_data.get('store_name'),
                 product_name=deal_data.get('product_name')
             ).first()
+
             if existing:
                 for k, v in deal_data.items():
                     setattr(existing, k, v)
                 existing.updated_at = datetime.utcnow()
             else:
                 db.session.add(Deal(**deal_data))
+
             added += 1
+
         except Exception as e:
             print(f"Error adding deal: {e}")
             db.session.rollback()
             continue
+
     db.session.commit()
     return jsonify({'success': True, 'deals_processed': len(data), 'deals_added': added})
+
 
 @app.route('/api/admin/deals/cleanup', methods=['POST'])
 def cleanup_old_deals():
@@ -278,7 +312,7 @@ scheduler.add_job(
     func=scheduled_scraper,
     trigger="cron",
     hour=20,
-    minute=7,
+    minute=18,
     id='daily_scraper'
 )
 
