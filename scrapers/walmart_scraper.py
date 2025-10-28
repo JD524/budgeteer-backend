@@ -5,11 +5,12 @@ from typing import List, Dict, Any
 
 WALMART_GRAPHQL_URL = "https://www.walmart.com/orchestra/home/graphql/HomePageWebRedesignBtf/97471cea0bb256c5caed77587c60c5c863e4c0c493eae4ce1051d86a6ad6a7de"
 
-# These headers are copied from real browser traffic you captured.
 WALMART_HEADERS = {
     "accept": "application/json",
     "accept-language": "en-US",
     "content-type": "application/json",
+    "origin": "https://www.walmart.com",
+    "referer": "https://www.walmart.com/",
     "sec-ch-ua": '"Google Chrome";v="141", "Not?A_Brand";v="8", "Chromium";v="141"',
     "sec-ch-ua-mobile": "?0",
     "sec-ch-ua-platform": '"Windows"',
@@ -21,34 +22,29 @@ WALMART_HEADERS = {
         "AppleWebKit/537.36 (KHTML, like Gecko) "
         "Chrome/141.0.0.0 Safari/537.36"
     ),
-    # Walmart expects these hint headers:
     "x-o-bu": "WALMART-US",
     "x-o-platform": "rweb",
     "x-o-platform-version": "usweb-1.230.1-72b46a24d08b3b2f119e9a9c3e542a129a96385f-0241544r",
     "x-o-mart": "B2C",
+    "x-o-ccm": "server",
+    "x-o-platform": "rweb",
+    "x-o-mart": "B2C",
+    # these aren't strictly required, but make us look closer to your captured request
+    "wm_page_url": "https://www.walmart.com/",
+    "x-o-bu": "WALMART-US",
 }
 
-# Super important cookies. These are from YOUR browser session.
-# For now we're hardcoding. Later we can make them env vars.
 WALMART_COOKIES = {
-    # session identity
     "vtc": "Rf6n5_hr5KjhaAyHSldq9s",
     "ACID": "8b86e975-5517-4398-b91f-4bd43f7dd6f2",
     "hasACID": "true",
     "_m": "9",
-
-    # store / geo targeting
     "assortmentStoreId": "4285",
-
-    # these blobs tell walmart what store/zip you're "in"
-    # NOTE: paste EXACT values you saw in DevTools for locDataV3 and locGuestData.
-    # I've truncated them here to show structure.
-    "locDataV3": "eyJpc0RlZmF1bHRlZCI6ZmFsc2UsImlzRXhwbGljaXQiOmZhbHNlLCJpbnRlbnQiOiJTSElQUElORyIsInBpY2t1cCI6W3sibm9kZUlkIjoiNDI4NSIsImRpc3BsYXlOYW1lIjoiQ2xldmVsYW5kIFN1cGVyY2VudGVyIiwiYWRkcmVzcyI6eyJwb3N0YWxDb2RlIjoiNDQxMDkiLCJhZGRyZXNzTGluZTEiOiIzNDAwIFNURUVMWUFSRCBEUiIsImNpdHkiOiJDbGV2ZWxhbmQiLCJzdGF0ZSI6Ik9IIiwiY291bnRyeSI6IlVTIn0sImdlb1BvaW50Ijp7ImxhdGl0dWRlIjo0MS40NjE1ODEsImxvbmdpdHVkZSI6LTgxLjY5MjcxM30sInNjaGVkdWxlZEVuYWJsZWQiOnRydWUsInVuU2NoZWR1bGVkRW5hYmxlZCI6dHJ1ZSwic3RvcmVIcnMiOiIwNjowMC0yMjowMCIsImFsbG93ZWRXSUNBZ2VuY2llcyI6WyJPSCJdLCJzdXBwb3J0ZWRBY2Nlc3NUeXBlcyI6WyJQSUNLVVBfQ1VSQlNJREUiLCJXSVJFTEVTU19TRVJWSUNFIiwiQUNDX0lOR1JPVU5EIiwiQUNDIiwiUElDS1VQX0JBS0VSWSIsIlBJQ0tVUF9JTlNUT1JFIiwiUElDS1VQX1NQRUNJQUxfRVZFTlQiXSwidGltZVpvbmUiOiJBbWVyaWNhL05ld19Zb3JrIiwic3RvcmVCcmFuZEZvcm1hdCI6IldhbG1hcnQgU3VwZXJjZW50ZXIiLCJzZWxlY3Rpb25UeXBlIjoiTFNfU0VMRUNURUQifSx7Im5vZGVJZCI6IjIzNjIifV0=",  # <-- keep full string
-    "locGuestData": "eyJpbnRlbnQiOiJTSElQUElORyIsImlzRXhwbGljaXQiOmZhbHNlLCJzdG9yZUludGVudCI6IlBJQ0tVUCIsIm1lcmdlRmxhZyI6ZmFsc2UsImlzRGVmYXVsdGVkIjpmYWxzZSwicGlja3VwIjp7Im5vZGVJZCI6IjQyODUiLCJ0aW1lc3RhbXAiOjE3NjE0MDc3ODA2MjMsInNlbGVjdGlvblR5cGUiOiJMU19TRUxFQ1RFRCIsInNlbGVjdGlvblNvdXJjZSI6IklQX1NOSUZGRURfQllfTFMifX0=",  # <-- keep full string
+    # paste your full blobs here (no truncation!)
+    "locDataV3": "FULL_LOC_DATA_V3_VALUE",
+    "locGuestData": "FULL_LOC_GUEST_DATA_VALUE",
 }
 
-# This payload is the same structure Walmart expects on HomePageWebRedesignBtf
-# (trimmed to only what's actually required to get carousels/modules back).
 WALMART_BODY = {
     "variables": {
         "tenant": "WM_GLASS",
@@ -57,66 +53,74 @@ WALMART_BODY = {
         "pageType": "GlassHomePageDesktopV1",
         "postProcessingVersion": 2,
         "p13NCallType": "BTF",
+
+        # personalization block
         "p13n": {
             "selectedIntent": "NONE",
             "userClientInfo": {
                 "deviceType": "desktop"
             }
         },
+
         "userClientInfo": {
             "deviceType": "desktop"
         },
         "userReqInfo": {
             "isMoreOptionsTileEnabled": True
         },
+
+        # feature flags we saw you send
         "enableSeoHomePageMetaData": True,
         "enableEventTimerSeconds": True,
         "isPlusBannerRedesign": True,
         "isBTF": True,
-        "p13nMetadata": "",  # we can leave this blank for now
+
+        # we’ll leave p13nMetadata empty for now
+        "p13nMetadata": "",
+
+        # IMPORTANT:
+        # we ask Walmart to hydrate this module specifically.
+        # If Walmart refuses because the module name doesn’t match what
+        # they expect for you, we'll see that in the error body we log.
         "lazyModules": [
-            # we only REALLY care about Flash Deals etc.
             {
                 "name": "Flash Deals Item Carousel Module - 12.12.24 ",
                 "type": "ItemCarousel",
                 "version": 2,
-                "status": "published"
+                "status": "published",
             }
         ],
     }
 }
 
-def _looks_like_waiting_room(resp_json: Any) -> bool:
+
+def _looks_like_waiting_room(resp_text: str, status: int) -> bool:
     """
-    Walmart's anti-bot 'waiting room' returns a totally different shape,
-    usually { data: { type: 'standard', title: 'Hang on...' } }
-    If we see that, we bail gracefully.
+    If we land in anti-bot, sometimes we still get 200 but with
+    a tiny JSON blob like:
+    {
+      "data": {
+        "type": "standard",
+        "title": "Hang on- you're so close..."
+      }
+    }
+    Other times we get HTML (captcha, queue, etc).
+
+    We'll just pattern match here.
     """
-    if not isinstance(resp_json, dict):
-        return False
-    # what you showed in logs actually looked like:
-    # { "data": { "type": "standard", "title": "Hang on- you're so close..." } }
-    inner = resp_json.get("data")
-    if isinstance(inner, dict):
-        if inner.get("type") == "standard" and "Hang on" in inner.get("title", ""):
-            return True
+    if "Hang on- you're so close" in resp_text:
+        return True
+    if "WaitingRoom.png" in resp_text:
+        return True
+    if "distil_r_captcha" in resp_text.lower():
+        return True
+    if status == 429:
+        return True
     return False
 
 
 def _extract_deals(resp_json: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """
-    Walk the modules -> find carousels -> pull out products in the same shape we use everywhere else.
-    We'll return a list of dicts:
-    {
-       "title": str,
-       "price": float | None,
-       "price_str": str | None,
-       "image": str | None,
-       "url": str | None,
-       "store": "Walmart"
-    }
-    """
-    deals: List[Dict[str, Any]] = []
+    deals = []
 
     layout = (
         resp_json
@@ -139,22 +143,23 @@ def _extract_deals(resp_json: Dict[str, Any]) -> List[Dict[str, Any]]:
             currentPrice = priceInfo.get("currentPrice", {})
             price_val = currentPrice.get("price")
             price_str = currentPrice.get("priceString")
-            image = (
+
+            thumb = (
                 p.get("imageInfo", {})
                 .get("thumbnailUrl")
             )
-            # canonicalUrl is relative like "/ip/..."; prepend walmart.com so frontend can click
+
             rel_url = p.get("canonicalUrl")
-            if rel_url:
-                full_url = "https://www.walmart.com" + rel_url
-            else:
-                full_url = None
+            full_url = (
+                "https://www.walmart.com" + rel_url
+                if rel_url else None
+            )
 
             deals.append({
                 "title": name,
                 "price": price_val,
                 "price_str": price_str,
-                "image": image,
+                "image": thumb,
                 "url": full_url,
                 "store": "Walmart",
             })
@@ -178,28 +183,39 @@ def fetch_deals(extra_cookies: Dict[str, str] = None) -> List[Dict[str, Any]]:
     session.cookies = jar
 
     try:
+        # IMPORTANT CHANGE: use json= instead of data=json.dumps(...)
         resp = session.post(
             WALMART_GRAPHQL_URL,
-            data=json.dumps({
-                "variables": WALMART_BODY["variables"]
-            }),
+            json={"variables": WALMART_BODY["variables"]},
         )
 
-        if resp.status_code == 429:
-            logging.error("Walmart 429 / waiting room")
+        status = resp.status_code
+        text = resp.text or ""
+
+        # log status always, so we can see if it's 200/403/etc
+        logging.error("Walmart status: %s", status)
+
+        # detect waiting room / captcha before attempting JSON parse
+        if _looks_like_waiting_room(text, status):
+            logging.error("Blocked by Walmart / waiting room / captcha")
+            logging.error("First 500 chars of body: %r", text[:500])
             return []
 
-        data_json = resp.json()
+        # try JSON
+        try:
+            data_json = resp.json()
+        except Exception:
+            # dump body so we can inspect what Walmart actually sent
+            logging.error("Non-JSON Walmart body (first 500 chars): %r", text[:500])
+            raise  # re-raise so outer except logs stacktrace
 
-        if _looks_like_waiting_room(data_json):
-            logging.error("Walmart anti-bot waiting room triggered")
-            return []
-
+        # happy path
         return _extract_deals(data_json)
 
     except Exception as e:
         logging.exception("Walmart request failed: %s", e)
         return []
+
 
 if __name__ == "__main__":
     # quick local smoke test
