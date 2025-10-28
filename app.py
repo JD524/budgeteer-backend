@@ -278,15 +278,15 @@ def scheduled_scraper():
     print("=" * 60)
 
     try:
-        # Are we running on Railway?
         railway_domain = os.environ.get('RAILWAY_PUBLIC_DOMAIN')
 
         if railway_domain:
-            # We're in prod container. Talk to gunicorn directly.
-            api_url = "http://127.0.0.1:8080"
+            # e.g. "web-production-b311.up.railway.app"
+            api_url = f"https://{railway_domain}"
         else:
-            # Local dev fallback
-            api_url = "http://localhost:5000"
+            # local dev fallback
+            # if you're testing with gunicorn locally on 8080, you can point this at 127.0.0.1:8080 instead
+            api_url = "http://127.0.0.1:8080"
 
         print(f"📍 Using API URL: {api_url}")
 
@@ -312,7 +312,7 @@ scheduler.add_job(
     func=scheduled_scraper,
     trigger="cron",
     hour=20,
-    minute=18,
+    minute=24,
     id='daily_scraper'
 )
 
