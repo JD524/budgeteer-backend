@@ -239,25 +239,23 @@ def trigger_scraper():
     return jsonify({'message': 'Scraper triggered! Check logs.'})
 
 def scheduled_scraper():
-    """Automatically run ALL scrapers (Walmart + Giant Eagle), then upload results to the API."""
     print("=" * 60)
     print(f"🔄 Running scheduled scraper at {datetime.utcnow()}")
     print("=" * 60)
 
     try:
-        # Figure out which API URL to upload to.
-        # On Railway, RAILWAY_PUBLIC_DOMAIN will be like "web-production-...up.railway.app"
-        api_url = os.environ.get('RAILWAY_PUBLIC_DOMAIN')
-        if api_url:
-            # make sure it's a full https URL
-            api_url = f"https://{api_url}"
+        # Are we running on Railway?
+        railway_domain = os.environ.get('RAILWAY_PUBLIC_DOMAIN')
+
+        if railway_domain:
+            # We're in prod container. Talk to gunicorn directly.
+            api_url = "http://127.0.0.1:8080"
         else:
-            # local fallback
+            # Local dev fallback
             api_url = "http://localhost:5000"
 
         print(f"📍 Using API URL: {api_url}")
 
-        # Run scrapers + upload
         exit_code = run_all_scrapers(api_url)
 
         if exit_code == 0:
@@ -271,6 +269,7 @@ def scheduled_scraper():
         traceback.print_exc()
 
 
+
 print("Setting up daily scraper schedule...")
 scheduler = BackgroundScheduler()
 
@@ -278,8 +277,8 @@ scheduler = BackgroundScheduler()
 scheduler.add_job(
     func=scheduled_scraper,
     trigger="cron",
-    hour=6,
-    minute=0,
+    hour=8,
+    minute=5,
     id='daily_scraper'
 )
 
