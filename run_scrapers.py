@@ -1,19 +1,21 @@
 """
-Script to run all scrapers and upload deals to the API
-Can be run manually or via cron job
+Script to run all scrapers and upload deals to the API.
+Can be run manually or via scheduler.
 """
 
-import requests
 import sys
+import requests
 from datetime import datetime
-from scrapers.walmart_scraper import WalmartScraper
 
-# Configuration
-API_URL = "https://web-production-b311.up.railway.app"  # Change to your deployed URL
+from scrapers.walmart_scraper import WalmartScraper
+from scrapers.giant_eagle_scraper import GiantEagleScraper
+
+# Default API URL (can still be overridden by CLI arg or env via scheduled_scraper)
+API_URL = "https://web-production-b311.up.railway.app"
 
 
 def upload_deals(deals, api_url):
-    """Upload deals to the API"""
+    """Upload deals to the API in bulk."""
     try:
         response = requests.post(
             f"{api_url}/api/admin/deals/bulk",
@@ -36,40 +38,59 @@ def upload_deals(deals, api_url):
 
 
 def run_walmart_scraper():
-    """Run Walmart scraper"""
+    """Run Walmart scraper."""
     print("🛒 Running Walmart scraper...")
     try:
         scraper = WalmartScraper()
         deals = scraper.scrape_deals()
-        print(f"   Found {len(deals)} deals")
+        print(f"   Walmart found {len(deals)} deals")
         return deals
     except Exception as e:
-        print(f"   ❌ Error: {e}")
+        print(f"   ❌ Walmart error: {e}")
+        return []
+
+
+def run_giant_eagle_scraper():
+    """Run Giant Eagle scraper (currently hardcoded to Stow / storeCode=4096)."""
+    print("🦅 Running Giant Eagle scraper (storeCode=4096)...")
+    try:
+        scraper = GiantEagleScraper(store_code="4096", store_label="stow")
+
+        # IMPORTANT: optionally simplify store_name for now so the app shows just "Giant Eagle".
+        # We'll do that here after we scrape so we don't have to change the scraper file itself.
+        raw_deals = scraper.scrape_deals()
+
+        for d in raw_deals:
+            # Overwrite "Giant Eagle (stow)" → "Giant Eagle"
+            if d.get("store_name"):
+                d["store_name"] = "Giant Eagle"
+
+        print(f"   Giant Eagle found {len(raw_deals)} deals")
+        return raw_deals
+    except Exception as e:
+        print(f"   ❌ Giant Eagle error: {e}")
         return []
 
 
 def run_all_scrapers(api_url):
-    """Run all scrapers and upload results"""
-    print(f"\n{'=' * 60}")
+    """Run all scrapers and upload results."""
+    print("\n" + "=" * 60)
     print(f"Starting scraper run at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"{'=' * 60}\n")
+    print("=" * 60 + "\n")
 
     all_deals = []
 
-    # Run Walmart scraper
+    # Walmart
     walmart_deals = run_walmart_scraper()
     all_deals.extend(walmart_deals)
 
-    # TODO: Add more scrapers here
-    # target_deals = run_target_scraper()
-    # all_deals.extend(target_deals)
+    # Giant Eagle
+    giant_eagle_deals = run_giant_eagle_scraper()
+    all_deals.extend(giant_eagle_deals)
 
-    # kroger_deals = run_kroger_scraper()
-    # all_deals.extend(kroger_deals)
-
-    print(f"\n{'=' * 60}")
+    print("\n" + "=" * 60)
     print(f"Total deals collected: {len(all_deals)}")
-    print(f"{'=' * 60}\n")
+    print("=" * 60 + "\n")
 
     if all_deals:
         print("📤 Uploading deals to API...")
@@ -87,7 +108,8 @@ def run_all_scrapers(api_url):
 
 
 if __name__ == '__main__':
-    # Allow API URL to be passed as command line argument
+    # Allow API URL to be passed as command line argument:
+    #   python scrapers/run_scrapers.py https://your-api-here
     api_url = sys.argv[1] if len(sys.argv) > 1 else API_URL
     exit_code = run_all_scrapers(api_url)
     sys.exit(exit_code)
