@@ -206,6 +206,32 @@ def cleanup_old_deals():
     return jsonify({'success': True, 'deleted_count': deleted})
 
 
+@app.route('/api/admin/delete-sample-deals', methods=['POST'])
+def delete_sample_deals():
+    """Delete the 3 sample Walmart deals"""
+    try:
+        # Sample deals have these exact names
+        sample_names = [
+            'Great Value Pizza, Pepperoni, 12"',
+            'Tyson Chicken Nuggets, 2 lb',
+            'Coca-Cola, 12 pack cans'
+        ]
+
+        deleted = 0
+        for name in sample_names:
+            deal = Deal.query.filter_by(
+                store_name='Walmart',
+                product_name=name
+            ).first()
+            if deal:
+                db.session.delete(deal)
+                deleted += 1
+
+        db.session.commit()
+        return jsonify({'success': True, 'deleted': deleted})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 @app.route('/api/admin/trigger-scraper', methods=['GET'])
 def trigger_scraper():
     """Manually trigger scraper for testing"""
