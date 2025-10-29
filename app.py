@@ -312,7 +312,7 @@ scheduler.add_job(
     func=scheduled_scraper,
     trigger="cron",
     hour=23,
-    minute=17,
+    minute=20,
     id='daily_scraper'
 )
 
