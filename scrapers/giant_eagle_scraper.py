@@ -1,22 +1,20 @@
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 from datetime import datetime, timedelta
 
 
 class GiantEagleScraper:
     """
-    Scrapes Giant Eagle weekly ad deals using their GraphQL endpoint.
-
-    Right now we target one store (storeCode="4096", which corresponds to Stow).
-    Later we can make storeCode dynamic (e.g. based on user location).
+    Scrapes Giant Eagle weekly-ad / promo items via their GraphQL endpoint.
+    Default storeCode=4096 (Stow). Keep store_label for nice display / deep links.
     """
 
     def __init__(self, store_code="4096", store_label="stow"):
         self.endpoint = "https://core.shop.gianteagle.com/api/v2"
-        self.store_code = store_code         # "4096"
-        self.store_label = store_label       # for display like "Giant Eagle (stow)"
+        self.store_code = store_code
+        self.store_label = store_label
 
-        # Base headers: we mimic the browser enough for the API to answer.
-        # We include Content-Type because it's a GraphQL-style POST.
         self.headers = {
             "User-Agent": (
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -29,8 +27,7 @@ class GiantEagleScraper:
             "Referer": "https://www.gianteagle.com/",
         }
 
-        # This is the GraphQL query you captured. We'll keep it verbatim.
-        # (It can be long, that's fine. It's static.)
+        # === Your captured query (kept verbatim) ===
         self.query_text = (
             "fragment GetProductTileData on Product {\n"
             "  allergens\n"
@@ -39,27 +36,15 @@ class GiantEagleScraper:
             "  categorySeoUrls\n"
             "  comparedPrice\n"
             "  coupons {\n"
-            "    conditions {\n"
-            "      minBasketValue\n"
-            "      minQty\n"
-            "      offerType\n"
-            "      __typename\n"
-            "    }\n"
+            "    conditions { minBasketValue minQty offerType __typename }\n"
             "    couponScope\n"
             "    description\n"
             "    disclaimer\n"
             "    expiryDateFormatted\n"
             "    id\n"
             "    imageUrl\n"
-            "    products {\n"
-            "      sku\n"
-            "      __typename\n"
-            "    }\n"
-            "    rewards {\n"
-            "      offerValue\n"
-            "      rewardQuantity\n"
-            "      __typename\n"
-            "    }\n"
+            "    products { sku __typename }\n"
+            "    rewards { offerValue rewardQuantity __typename }\n"
             "    summary\n"
             "    __typename\n"
             "  }\n"
@@ -71,49 +56,21 @@ class GiantEagleScraper:
             "  fulfillmentMethods\n"
             "  healthClaims\n"
             "  id\n"
-            "  images {\n"
-            "    fileSize\n"
-            "    format\n"
-            "    height\n"
-            "    kind\n"
-            "    url\n"
-            "    width\n"
-            "    __typename\n"
-            "  }\n"
+            "  images { fileSize format height kind url width __typename }\n"
             "  indications\n"
             "  ingredients\n"
             "  name\n"
-            "  offers {\n"
-            "    brand\n"
-            "    id\n"
-            "    image\n"
-            "    offerDetailsType\n"
-            "    offerType\n"
-            "    rewardInfo\n"
-            "    tags\n"
-            "    title\n"
-            "    __typename\n"
-            "  }\n"
+            "  offers { brand id image offerDetailsType offerType rewardInfo tags title __typename }\n"
             "  price\n"
             "  pricingModel\n"
-            "  productLocation {\n"
-            "    aisleLocation\n"
-            "    __typename\n"
-            "  }\n"
-            "  restrictions {\n"
-            "    restrictionKind\n"
-            "    __typename\n"
-            "  }\n"
+            "  productLocation { aisleLocation __typename }\n"
+            "  restrictions { restrictionKind __typename }\n"
             "  inventoryStatus\n"
             "  isNewLowPrice\n"
             "  isEverydaySavings\n"
             "  isFoodStampItem\n"
             "  isFsaEligible\n"
-            "  scopedPromo {\n"
-            "    priceLock\n"
-            "    qty\n"
-            "    __typename\n"
-            "  }\n"
+            "  scopedPromo { priceLock qty __typename }\n"
             "  scopedPromoDisplayPricePerUnit\n"
             "  scopedPromoPrice\n"
             "  scopedPromoUnitPrice\n"
@@ -129,28 +86,14 @@ class GiantEagleScraper:
             "  lastPurchaseDate\n"
             "  __typename\n"
             "}\n"
-            "\n"
             "query GetProducts($cursor: String, $count: Int, $filters: ProductFilters, $store: StoreInput!, $sort: ProductSortKey) {\n"
-            "  products(\n"
-            "    first: $count\n"
-            "    after: $cursor\n"
-            "    filters: $filters\n"
-            "    store: $store\n"
-            "    sort: $sort\n"
-            "  ) {\n"
+            "  products(first: $count, after: $cursor, filters: $filters, store: $store, sort: $sort) {\n"
             "    edges {\n"
             "      cursor\n"
-            "      node {\n"
-            "        ...GetProductTileData\n"
-            "        __typename\n"
-            "      }\n"
+            "      node { ...GetProductTileData __typename }\n"
             "      __typename\n"
             "    }\n"
-            "    pageInfo {\n"
-            "      endCursor\n"
-            "      hasNextPage\n"
-            "      __typename\n"
-            "    }\n"
+            "    pageInfo { endCursor hasNextPage __typename }\n"
             "    totalCount\n"
             "    queryId\n"
             "    responseId\n"
@@ -159,10 +102,35 @@ class GiantEagleScraper:
             "}\n"
         )
 
-    def _fetch_products_page(self, cursor=None, count=34):
+        # Retryy/timeout session
+        self.session = requests.Session()
+        retry = Retry(
+            total=4, connect=3, read=3, status=3,
+            status_forcelist=(502, 503, 504),
+            allowed_methods=("POST",),
+            backoff_factor=0.8,
+            raise_on_status=False,
+        )
+        adapter = HTTPAdapter(max_retries=retry, pool_connections=10, pool_maxsize=10)
+        self.session.mount("https://", adapter)
+        self.session.mount("http://", adapter)
+
+    def _post(self, payload, timeout=(10, 45)):
+        resp = self.session.post(self.endpoint, json=payload, headers=self.headers, timeout=timeout)
+        if resp.status_code != 200:
+            raise RuntimeError(f"GE non-200 {resp.status_code}: {resp.text[:300]}")
+        try:
+            data = resp.json()
+        except ValueError:
+            raise RuntimeError(f"GE invalid JSON: {resp.text[:300]}")
+        if "errors" in data and data["errors"]:
+            # surface GraphQL errors for fast diagnosis
+            raise RuntimeError(f"GE GraphQL errors: {data['errors']}")
+        return data
+
+    def _fetch_products_page(self, cursor=None, count=32):
         """
-        Calls the Giant Eagle GraphQL endpoint for this store.
-        We send basically the same POST payload we saw in DevTools.
+        Same shape you captured originally: GetProducts + filters (circular: true) and store.storeCode.
         """
         payload = {
             "operationName": "GetProducts",
@@ -176,141 +144,85 @@ class GiantEagleScraper:
                     "healthClaimIds": [],
                     "benefitPrograms": [],
                     "savings": [],
-                    "circular": True,           # only sale/weekly-ad items
+                    "circular": True,          # weekly ad / promos
                     "excludeRestricted": False
                 },
-                "store": {
-                    "storeCode": self.store_code  # <-- "4096"
-                },
+                "store": { "storeCode": self.store_code },  # NOTE: storeCode (NOT "code")
                 "sort": "bestMatch"
             }
         }
+        return self._post(payload)
 
-        resp = requests.post(
-            self.endpoint,
-            json=payload,
-            headers=self.headers,
-            timeout=15
-        )
-
-        if resp.status_code != 200:
-            print(f"❌ Giant Eagle fetch failed: {resp.status_code}")
-            print(resp.text[:300])
-            return None
-
-        try:
-            return resp.json()
-        except Exception as e:
-            print(f"❌ Failed to parse JSON: {e}")
-            print(resp.text[:300])
-            return None
-
-    def _pick_image(self, images):
-        """
-        Pick a nice image URL from node.images, preferring a 256x256 variant.
-        """
+    @staticmethod
+    def _pick_image(images):
         if not images:
             return None
-
-        # Prefer kind containing "256" first
         for img in images:
             kind = (img.get("kind") or "").lower()
             if "256" in kind and img.get("url"):
                 return img["url"]
-
-        # Otherwise first valid url
         for img in images:
             if img.get("url"):
                 return img["url"]
-
         return None
 
     def scrape_deals(self):
         """
-        Fetch first page of weekly-ad products and normalize them to our deal shape.
+        Pull first page; you can loop pagination if needed via pageInfo.hasNextPage/endCursor.
         """
-        data = self._fetch_products_page(cursor=None, count=34)
-        if not data:
-            print("⚠️ No data returned from Giant Eagle API")
+        try:
+            data = self._fetch_products_page(cursor=None, count=36)
+        except Exception as e:
+            print(f"⚠️ Giant Eagle request failed: {e}")
             return []
 
-        products_root = (
-            data
-            .get("data", {})
-            .get("products", {})
-        )
+        products_root = (data.get("data", {}) or {}).get("products", {})  # :contentReference[oaicite:5]{index=5}
+        edges = products_root.get("edges", []) or []
+        if not edges:
+            print("⚠️ No products returned from Giant Eagle API")
+            return []
 
-        edges = products_root.get("edges", [])
-        # (We COULD loop more pages if hasNextPage is true using pageInfo.endCursor.)
-
-        deals = []
         now = datetime.utcnow()
         valid_from = now.isoformat()
         valid_until = (now + timedelta(days=7)).isoformat()
 
+        deals = []
         for idx, edge in enumerate(edges):
-            node = edge.get("node", {})
-            if not node:
-                continue
-
+            node = edge.get("node") or {}
             name = node.get("name")
             if not name:
                 continue
 
-            # current price: "5.99" -> "$5.99"
             price_val = node.get("scopedPromoPrice") or node.get("price")
             current_price = f"${price_val}" if price_val else None
 
-            # original price: "7.29" -> "$7.29"
             compared_price_val = node.get("comparedPrice")
             original_price = f"${compared_price_val}" if compared_price_val else None
-
             if not current_price:
-                # If there's truly no numeric price (e.g. "BOGO" only), skip for now
                 continue
 
-            # per-unit/size info
-            size_info = node.get("displayItemSize")          # "1 lb (avg.)"
-            per_unit = node.get("displayPricePerUnit")       # "$5.99/lb"
-            extras = []
-            if size_info:
-                extras.append(size_info)
-            if per_unit and per_unit != current_price:
-                extras.append(per_unit)
-            display_price = current_price
-            if extras:
-                display_price = f"{current_price} ({', '.join(extras)})"
+            size_info = node.get("displayItemSize")
+            per_unit = node.get("displayPricePerUnit")
+            extras = [x for x in (size_info, per_unit) if x]
+            display_price = current_price if not extras else f"{current_price} ({', '.join(extras)})"
 
-            # discount math: Save $X
             discount_str = None
             try:
                 if price_val and compared_price_val:
-                    cur_f = float(price_val)
-                    orig_f = float(compared_price_val)
-                    diff = orig_f - cur_f
+                    diff = float(compared_price_val) - float(price_val)
                     if diff > 0:
                         discount_str = f"Save ${diff:.2f}"
             except Exception:
                 pass
 
-            # category: last categoryNames entry is usually most specific
-            category_names = node.get("categoryNames") or []
-            if category_names:
-                category_guess = category_names[-1]
-            else:
-                category_guess = "Grocery"
+            cats = node.get("categoryNames") or []
+            category_guess = cats[-1] if cats else "Grocery"
 
-            # image
             image_url = self._pick_image(node.get("images"))
-
-            # build optional product link from sku (to show user where to buy)
             sku = node.get("sku")
-            if sku:
-                deal_url = f"https://www.gianteagle.com/{self.store_label}/search/product/{sku}"
-            else:
-                deal_url = None
+            deal_url = f"https://www.gianteagle.com/{self.store_label}/search/product/{sku}" if sku else None
 
-            deal = {
+            deals.append({
                 "store_name": f"Giant Eagle ({self.store_label})",
                 "product_name": name[:200],
                 "price": display_price,
@@ -321,11 +233,11 @@ class GiantEagleScraper:
                 "image_url": image_url,
                 "deal_url": deal_url,
                 "valid_from": valid_from,
-                "valid_until": valid_until
-            }
+                "valid_until": valid_until,
+            })
 
-            deals.append(deal)
-            print(f"  ✓ [{idx+1}] {deal['product_name'][:60]}  |  {deal['price']}  |  {deal.get('discount')}")
+            line_left = name[:60]
+            print(f"  ✓ [{idx+1}] {line_left}  |  {display_price}  |  {discount_str or ''}".rstrip())
 
         print(f"🦅 Giant Eagle ({self.store_label}) total scraped deals: {len(deals)}")
         return deals
@@ -333,7 +245,7 @@ class GiantEagleScraper:
 
 if __name__ == "__main__":
     scraper = GiantEagleScraper(store_code="4096", store_label="stow")
-    deals = scraper.scrape_deals()
-    print(f"\nFound {len(deals)} deals.\n")
-    for d in deals[:10]:
-        print(f"{d['product_name']}  -> {d['price']}  ({d.get('discount')})")
+    out = scraper.scrape_deals()
+    print(f"\nFound {len(out)} deals.\n")
+    for d in out[:10]:
+        print(f"{d['product_name']} -> {d['price']} ({d.get('discount')})")
