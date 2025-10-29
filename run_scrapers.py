@@ -9,6 +9,7 @@ from datetime import datetime
 
 from scrapers.walmart_scraper import WalmartScraper
 from scrapers.giant_eagle_scraper import GiantEagleScraper
+from scrapers.aldi_scraper import AldiScraper
 
 # Default API URL (can still be overridden by CLI arg or env via scheduled_scraper)
 API_URL = "https://web-production-b311.up.railway.app"
@@ -71,6 +72,19 @@ def run_giant_eagle_scraper():
         print(f"   ❌ Giant Eagle error: {e}")
         return []
 
+def run_aldi_scraper():
+    """Run Aldi scraper (Playwright-bootstrapped)."""
+    print("🥬 Running Aldi scraper...")
+    try:
+        # headless in production; toggle with env ALDI_HEADFUL=1 for local debugging
+        scraper = AldiScraper()
+        deals = scraper.scrape_deals()
+        print(f"   Aldi found {len(deals)} deals")
+        return deals
+    except Exception as e:
+        print(f"   ❌ Aldi error: {e}")
+        return []
+
 
 def run_all_scrapers(api_url):
     """Run all scrapers and upload results."""
@@ -87,6 +101,10 @@ def run_all_scrapers(api_url):
     # Giant Eagle
     giant_eagle_deals = run_giant_eagle_scraper()
     all_deals.extend(giant_eagle_deals)
+
+    # Aldi
+    aldi_deals = run_aldi_scraper()
+    all_deals.extend(aldi_deals)
 
     print("\n" + "=" * 60)
     print(f"Total deals collected: {len(all_deals)}")
