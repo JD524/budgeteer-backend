@@ -10,6 +10,7 @@ from datetime import datetime
 from scrapers.walmart_scraper import WalmartScraper
 from scrapers.giant_eagle_scraper import GiantEagleScraper
 from scrapers.aldi_scraper import AldiScraper
+from scrapers.dollar_general_scraper import scrape_dollar_general
 
 # Default API URL (can still be overridden by CLI arg or env via scheduled_scraper)
 API_URL = "https://web-production-b311.up.railway.app"
@@ -57,12 +58,10 @@ def run_giant_eagle_scraper():
     try:
         scraper = GiantEagleScraper(store_code="4096", store_label="stow")
 
-        # IMPORTANT: optionally simplify store_name for now so the app shows just "Giant Eagle".
-        # We'll do that here after we scrape so we don't have to change the scraper file itself.
         raw_deals = scraper.scrape_deals()
 
+        # normalize store name
         for d in raw_deals:
-            # Overwrite "Giant Eagle (stow)" → "Giant Eagle"
             if d.get("store_name"):
                 d["store_name"] = "Giant Eagle"
 
@@ -72,11 +71,11 @@ def run_giant_eagle_scraper():
         print(f"   ❌ Giant Eagle error: {e}")
         return []
 
+
 def run_aldi_scraper():
     """Run Aldi scraper (Playwright-bootstrapped)."""
     print("🥬 Running Aldi scraper...")
     try:
-        # headless in production; toggle with env ALDI_HEADFUL=1 for local debugging
         scraper = AldiScraper()
         deals = scraper.scrape_deals()
         print(f"   Aldi found {len(deals)} deals")
@@ -86,10 +85,58 @@ def run_aldi_scraper():
         return []
 
 
+def run_dollar_general_scraper():
+    """Run Dollar General scraper (Flipp-based)."""
+    print("💛 Running Dollar General scraper...")
+    try:
+        # if you ever want to pass a different zip or pub, do it here
+        dg_data = scrape_dollar_general(zip_code="44224")
+
+        raw_offers = dg_data.get("weekly_ad", [])
+        deals = []
+
+        for offer in raw_offers:
+            # offer is already normalized by dollar_general_scraper.normalize_offer
+            # convert to your API's deal shape
+            deal = {
+                "retailer": "dollar_general",
+                "store_name": "Dollar General",
+                "title": offer.get("title"),
+                "description": offer.get("description") or offer.get("sale_story"),
+                "price": offer.get("price_text"),
+                "image_url": offer.get("image"),
+                # extras
+                "web_url": offer.get("web_url"),
+                "category": ", ".join(offer.get("categories", [])) if offer.get("categories") else None,
+                "valid_from": offer.get("valid_from"),
+                "valid_to": offer.get("valid_to"),
+            }
+
+            # you can skip empties if you want:
+            # if not deal["title"]:
+            #     continue
+
+            deals.append(deal)
+
+        # Limit to the first 50 deals to avoid overloading API
+        if len(deals) > 50:
+            deals = deals[:50]
+            print(f"   Dollar General capped to first 50 deals for upload.")
+        else:
+            print(f"   Dollar General found {len(deals)} deals")
+
+        return deals
+
+
+    except Exception as e:
+        print(f"   ❌ Dollar General error: {e}")
+        return []
+
+
 def run_all_scrapers(api_url):
     """Run all scrapers and upload results."""
     print("\n" + "=" * 60)
-    print(f"Starting scraper run at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"Starting scraper run at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")  # noqa
     print("=" * 60 + "\n")
 
     all_deals = []
@@ -105,6 +152,10 @@ def run_all_scrapers(api_url):
     # Aldi
     aldi_deals = run_aldi_scraper()
     all_deals.extend(aldi_deals)
+
+    # Dollar General
+    dg_deals = run_dollar_general_scraper()
+    all_deals.extend(dg_deals)
 
     print("\n" + "=" * 60)
     print(f"Total deals collected: {len(all_deals)}")
@@ -126,8 +177,6 @@ def run_all_scrapers(api_url):
 
 
 if __name__ == '__main__':
-    # Allow API URL to be passed as command line argument:
-    #   python scrapers/run_scrapers.py https://your-api-here
     api_url = sys.argv[1] if len(sys.argv) > 1 else API_URL
     exit_code = run_all_scrapers(api_url)
     sys.exit(exit_code)
