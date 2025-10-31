@@ -138,7 +138,7 @@ def get_deals():
 
     query = query.filter((Deal.valid_until.is_(None)) | (Deal.valid_until > datetime.utcnow()))
     query = query.order_by(Deal.created_at.desc())
-    limit = request.args.get('limit', 100, type=int)
+    limit = request.args.get('limit', 300, type=int)
     deals = query.limit(min(limit, 500)).all()
     return jsonify({'deals': [d.to_dict() for d in deals], 'count': len(deals)})
 
