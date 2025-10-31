@@ -331,8 +331,8 @@ scheduler = BackgroundScheduler()
 scheduler.add_job(
     func=scheduled_scraper,
     trigger="cron",
-    hour=4,
-    minute=0,
+    hour=23,
+    minute=34,
     id='daily_scraper'
 )
 scheduler.start()
