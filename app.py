@@ -24,6 +24,7 @@ app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {'pool_pre_ping': True}
 
 db = SQLAlchemy(app)
 
+
 # --- Models ---
 class Deal(db.Model):
     __tablename__ = 'deals'
@@ -58,6 +59,7 @@ class Deal(db.Model):
             'valid_until': self.valid_until.isoformat() if self.valid_until else None,
         }
 
+
 class Store(db.Model):
     __tablename__ = 'stores'
     id = db.Column(db.Integer, primary_key=True)
@@ -77,6 +79,7 @@ class Store(db.Model):
             'logo_url': self.logo_url,
             'last_scraped': self.last_scraped.isoformat() if self.last_scraped else None,
         }
+
 
 # --- One-time DB init at import (Flask 3.x compatible) ---
 def _init_db_once():
@@ -99,20 +102,26 @@ def _init_db_once():
             db.session.commit()
     except Exception as e:
         print("DB init error:", e)
-        try: db.session.rollback()
-        except: pass
+        try:
+            db.session.rollback()
+        except:
+            pass
+
 
 _init_db_once()
+
 
 # --- API Endpoints ---
 @app.route('/health', methods=['GET'])
 def health_check():
     return jsonify({'status': 'healthy', 'timestamp': datetime.utcnow().isoformat()})
 
+
 @app.route('/api/stores', methods=['GET'])
 def get_stores():
     stores = Store.query.filter_by(is_active=True).all()
     return jsonify({'stores': [s.to_dict() for s in stores], 'count': len(stores)})
+
 
 @app.route('/api/deals', methods=['GET'])
 def get_deals():
@@ -133,6 +142,7 @@ def get_deals():
     deals = query.limit(min(limit, 500)).all()
     return jsonify({'deals': [d.to_dict() for d in deals], 'count': len(deals)})
 
+
 @app.route('/api/deals/<store_name>', methods=['GET'])
 def get_deals_by_store(store_name):
     deals = Deal.query.filter(
@@ -140,6 +150,7 @@ def get_deals_by_store(store_name):
         (Deal.valid_until.is_(None)) | (Deal.valid_until > datetime.utcnow())
     ).order_by(Deal.created_at.desc()).all()
     return jsonify({'store': store_name, 'deals': [d.to_dict() for d in deals], 'count': len(deals)})
+
 
 @app.route('/api/deals/search', methods=['GET'])
 def search_deals():
@@ -153,6 +164,7 @@ def search_deals():
         (Deal.valid_until.is_(None)) | (Deal.valid_until > datetime.utcnow())
     ).order_by(Deal.created_at.desc()).limit(100).all()
     return jsonify({'query': q, 'deals': [d.to_dict() for d in deals], 'count': len(deals)})
+
 
 @app.route('/api/stats', methods=['GET'])
 def get_stats():
@@ -168,13 +180,14 @@ def get_stats():
         'last_updated': datetime.utcnow().isoformat()
     })
 
+
+# --- HARDENED BULK ENDPOINT ---
 @app.route('/api/admin/deals/bulk', methods=['POST'])
 def bulk_add_deals():
     data = request.get_json()
     if not isinstance(data, list):
         return jsonify({'error': 'Expected array of deals'}), 400
 
-    # Only these keys are valid DB columns on Deal
     allowed_fields = {
         'store_name',
         'product_name',
@@ -190,28 +203,36 @@ def bulk_add_deals():
     }
 
     added = 0
-    for incoming in data:
+    skipped = 0
+    errors = []
+
+    for idx, incoming in enumerate(data):
         try:
-            # 1. Strip unknown keys like rating/reviews/badges/etc.
             deal_data = {k: v for k, v in incoming.items() if k in allowed_fields}
 
-            # 2. Parse ISO strings into datetimes if provided
-            if 'valid_from' in deal_data and isinstance(deal_data['valid_from'], str):
+            # hard requirements
+            if not deal_data.get('store_name') or not deal_data.get('product_name'):
+                skipped += 1
+                errors.append(f"row {idx}: missing store_name/product_name")
+                continue
+
+            # datetime parsing
+            if isinstance(deal_data.get('valid_from'), str):
                 try:
                     deal_data['valid_from'] = datetime.fromisoformat(deal_data['valid_from'])
                 except Exception:
                     deal_data['valid_from'] = None
 
-            if 'valid_until' in deal_data and isinstance(deal_data['valid_until'], str):
+            if isinstance(deal_data.get('valid_until'), str):
                 try:
                     deal_data['valid_until'] = datetime.fromisoformat(deal_data['valid_until'])
                 except Exception:
                     deal_data['valid_until'] = None
 
-            # 3. Upsert by (store_name, product_name)
+            # upsert
             existing = Deal.query.filter_by(
-                store_name=deal_data.get('store_name'),
-                product_name=deal_data.get('product_name')
+                store_name=deal_data['store_name'],
+                product_name=deal_data['product_name']
             ).first()
 
             if existing:
@@ -224,12 +245,18 @@ def bulk_add_deals():
             added += 1
 
         except Exception as e:
-            print(f"Error adding deal: {e}")
             db.session.rollback()
-            continue
+            skipped += 1
+            errors.append(f"row {idx}: {e}")
 
     db.session.commit()
-    return jsonify({'success': True, 'deals_processed': len(data), 'deals_added': added})
+    return jsonify({
+        'success': True,
+        'deals_processed': len(data),
+        'deals_added': added,
+        'deals_skipped': skipped,
+        'errors': errors[:20],
+    })
 
 
 @app.route('/api/admin/deals/cleanup', methods=['POST'])
@@ -242,9 +269,7 @@ def cleanup_old_deals():
 
 @app.route('/api/admin/delete-sample-deals', methods=['POST'])
 def delete_sample_deals():
-    """Delete the 3 sample Walmart deals"""
     try:
-        # Sample deals have these exact names
         sample_names = [
             'Great Value Pizza, Pepperoni, 12"',
             'Tyson Chicken Nuggets, 2 lb',
@@ -266,11 +291,12 @@ def delete_sample_deals():
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
+
 @app.route('/api/admin/trigger-scraper', methods=['GET'])
 def trigger_scraper():
-    """Manually trigger scraper for testing"""
     scheduled_scraper()
     return jsonify({'message': 'Scraper triggered! Check logs.'})
+
 
 def scheduled_scraper():
     print("=" * 60)
@@ -281,11 +307,8 @@ def scheduled_scraper():
         railway_domain = os.environ.get('RAILWAY_PUBLIC_DOMAIN')
 
         if railway_domain:
-            # e.g. "web-production-b311.up.railway.app"
             api_url = f"https://{railway_domain}"
         else:
-            # local dev fallback
-            # if you're testing with gunicorn locally on 8080, you can point this at 127.0.0.1:8080 instead
             api_url = "http://127.0.0.1:8080"
 
         print(f"📍 Using API URL: {api_url}")
@@ -303,25 +326,19 @@ def scheduled_scraper():
         traceback.print_exc()
 
 
-
 print("Setting up daily scraper schedule...")
 scheduler = BackgroundScheduler()
-
-# Run at 6 AM UTC every day
 scheduler.add_job(
     func=scheduled_scraper,
     trigger="cron",
     hour=22,
-    minute=25,
+    minute=34,
     id='daily_scraper'
 )
-
 scheduler.start()
 print(f"Scheduler started! Next run: {scheduler.get_jobs()[0].next_run_time}")
 
-# Shut down scheduler gracefully on exit
 atexit.register(lambda: scheduler.shutdown())
-
 
 
 if __name__ == '__main__':
