@@ -13,6 +13,7 @@ from scrapers.walmart_scraper import WalmartScraper
 from scrapers.giant_eagle_scraper import GiantEagleScraper
 from scrapers.aldi_scraper import AldiScraper
 from scrapers.dollar_general_scraper import scrape_dollar_general
+from scrapers.marcs_scraper import MarcsScraper   # 👈 NEW
 
 # default: your Railway app
 DEFAULT_API_URL = "https://web-production-b311.up.railway.app"
@@ -207,6 +208,29 @@ def run_dollar_general_scraper():
         return []
 
 
+def run_marcs_scraper():
+    """
+    NEW: Marc's digital offers (Inmar JSON).
+    """
+    print("🧡 Running Marc's scraper...")
+    try:
+        scraper = MarcsScraper()
+        raw_deals = scraper.scrape_deals()
+        print(f"   Marc's found {len(raw_deals)} active offers")
+
+        # cap to avoid uploading 600+ items if they dump a huge file
+        raw_deals = raw_deals[:50]
+
+        return _normalize_deals(
+            raw_deals,
+            default_store="Marc's",
+            fallback_name_prefix="Marc's offer",
+        )
+    except Exception as e:
+        print(f"   ❌ Marc's error: {e}")
+        return []
+
+
 # ---------------------------------------------------------------------
 # ORCHESTRATOR
 # ---------------------------------------------------------------------
@@ -228,6 +252,9 @@ def run_all_scrapers(api_url: str):
 
     # Dollar General
     all_deals.extend(run_dollar_general_scraper())
+
+    # Marc's (NEW)
+    all_deals.extend(run_marcs_scraper())
 
     print("\n" + "=" * 60)
     print(f"Total deals collected: {len(all_deals)}")
