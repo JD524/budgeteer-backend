@@ -304,10 +304,6 @@ def scheduled_scraper():
     print("=" * 60)
 
     try:
-        import run_scrapers
-        print(f"📄 run_scrapers module path: {run_scrapers.__file__}")
-
-        from run_scrapers import run_all_scrapers
         railway_domain = os.environ.get('RAILWAY_PUBLIC_DOMAIN')
 
         if railway_domain:
@@ -336,7 +332,7 @@ scheduler.add_job(
     func=scheduled_scraper,
     trigger="cron",
     hour=0,
-    minute=45,
+    minute=48,
     id='daily_scraper'
 )
 scheduler.start()
