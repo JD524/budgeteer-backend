@@ -247,12 +247,8 @@ class WalmartScraper:
 
         return out
 
+    # scrapers/walmart_scraper.py
     def _normalize_product(self, p: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """
-        Convert Walmart product JSON into a compact "deal card".
-        Skip items with no sane price.
-        """
-
         name = p.get("name") or p.get("title")
         if not name:
             return None
@@ -263,75 +259,48 @@ class WalmartScraper:
         savings_amt = price_info.get("savingsAmount") or {}
         savings = price_info.get("savings") or {}
 
-        # current price string
         now_price_val = current.get("price")
         now_price_str = current.get("priceDisplay") or current.get("priceString")
         if not now_price_val and not now_price_str:
-            # if we truly can't tell the price, skip
             return None
 
-        # original / was price
+        # ✅ clean price (no "(SAVE ...)")
+        base_price_text = now_price_str or f"${now_price_val}"
+
+        # original / was
         orig_price_str = was.get("priceString")
 
-        # savings text like "SAVE $90.00"
-        save_text = savings_amt.get("priceString") or savings.get("priceString")
-
-        # Construct a human-friendly price line:
-        # ex: "Now $149.99 (SAVE $90.00)"
-        base_price_text = now_price_str or f"${now_price_val}"
-        if save_text:
-            display_price = f"{base_price_text} ({save_text})"
-        else:
-            display_price = base_price_text
-
-        # rating / reviews
-        rating = p.get("averageRating")
-        reviews = p.get("numberOfReviews")
-
-        # badges -> ["Clearance", "Reduced price", ...]
-        badges_list: List[str] = []
-        badges = (p.get("badges") or {}).get("flags") or []
-        for b in badges:
-            t = b.get("text")
-            if t:
-                badges_list.append(t)
-
-        # also sometimes lives under badges.groupsV2[].members[].content[].value
-        groupsV2 = (p.get("badges") or {}).get("groupsV2") or []
-        for group in groupsV2:
-            for mem in group.get("members", []):
-                for content in mem.get("content", []):
-                    val = content.get("value")
-                    if val:
-                        badges_list.append(val)
-
-        # de-dupe badges
-        badges_list = list(dict.fromkeys(badges_list))
-
-        # thumbnail
-        img = (p.get("imageInfo") or {}).get("thumbnailUrl")
-
-        # deep link
-        rel_url = (
-            p.get("canonicalUrl")
-            or p.get("productUrl")
-            or p.get("url")
+        # ✅ clean discount
+        save_text = (
+                savings_amt.get("priceString")
+                or savings.get("priceString")
+                or None
         )
-        if rel_url:
-            deal_url = "https://www.walmart.com" + rel_url
-        else:
-            deal_url = None
+        if save_text:
+            # normalize casing
+            save_text = save_text.upper()
+
+        rel_url = (
+                p.get("canonicalUrl")
+                or p.get("productUrl")
+                or p.get("url")
+        )
+        deal_url = "https://www.walmart.com" + rel_url if rel_url else None
+
+        img = (p.get("imageInfo") or {}).get("thumbnailUrl")
 
         return {
             "store_name": "Walmart",
             "product_name": name[:200],
-            "price": display_price,
-            "original_price": orig_price_str,
-            "rating": rating,
-            "reviews": reviews,
-            "badges": badges_list,
+            "price": base_price_text,  # ✅ clean
+            "original_price": orig_price_str,  # ✅ used by Swift
+            "discount": save_text,  # ✅ always here if Walmart gives it
+            "category": None,
+            "description": None,
             "image_url": img,
             "deal_url": deal_url,
+            "valid_from": None,
+            "valid_until": None,
         }
 
     def scrape_deals(self) -> List[Dict[str, Any]]:
@@ -348,19 +317,47 @@ class WalmartScraper:
 
         deals: List[Dict[str, Any]] = []
         for idx, p in enumerate(raw_products):
+            # build debug badges directly from raw product p
+            debug_badges: List[str] = []
+
+            flags = ((p.get("badges") or {}).get("flags") or [])
+            for b in flags:
+                t = b.get("text")
+                if t:
+                    debug_badges.append(t)
+
+            groupsV2 = ((p.get("badges") or {}).get("groupsV2") or [])
+            for group in groupsV2:
+                for mem in group.get("members", []):
+                    for content in mem.get("content", []):
+                        val = content.get("value")
+                        if val:
+                            debug_badges.append(val)
+
+            # de-dupe while preserving order
+            seen = set()
+            debug_badges_unique = []
+            for badge in debug_badges:
+                if badge not in seen:
+                    seen.add(badge)
+                    debug_badges_unique.append(badge)
+
+            # normalize for DB
             norm = self._normalize_product(p)
             if not norm:
                 continue
             deals.append(norm)
 
-            # pretty console line, like Giant Eagle
+            # pretty console line (no reliance on norm["badges"])
             line_left = norm["product_name"][:60]
             line_price = norm["price"]
-            badge_preview = ", ".join(norm["badges"][:2]) if norm["badges"] else ""
-            if badge_preview:
-                print(f"  🛒 [{idx+1}] {line_left} | {line_price} | {badge_preview}")
+            if debug_badges_unique:
+                print(
+                    f"  🛒 [{idx + 1}] {line_left} | {line_price} | "
+                    + ", ".join(debug_badges_unique[:2])
+                )
             else:
-                print(f"  🛒 [{idx+1}] {line_left} | {line_price}")
+                print(f"  🛒 [{idx + 1}] {line_left} | {line_price}")
 
         print(f"🛍️ Walmart total scraped deals: {len(deals)}")
         return deals
