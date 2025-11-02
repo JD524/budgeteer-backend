@@ -163,45 +163,56 @@ def run_aldi_scraper():
 
 
 def run_dollar_general_scraper():
-    """
-    Your DG scraper sometimes returns:
-      - a LIST of items (good), OR
-      - a DICT like {"retailer":..., "weekly_ad": [...], "count": ...}
-    Our old code assumed LIST → `deals[:50]` blew up on dict.
-    """
     print("💛 Running Dollar General scraper...")
     try:
         raw = scrape_dollar_general("44224")
-        print(f"   Dollar General scraped {len(raw) if hasattr(raw, '__len__') else 'unknown'} raw items")
-
-        # --- detect shape ---
+        # raw is usually: {"retailer": ..., "weekly_ad": [...], "count": ...}
         if isinstance(raw, dict):
-            # try the shapes we've seen in your logs
             if "weekly_ad" in raw and isinstance(raw["weekly_ad"], list):
-                deals = raw["weekly_ad"]
+                offers = raw["weekly_ad"]
             elif "items" in raw and isinstance(raw["items"], list):
-                deals = raw["items"]
+                offers = raw["items"]
             else:
-                # nothing useful, just bail out gracefully
                 print("   Dollar General: dict shape had no 'weekly_ad' or 'items' → skipping.")
                 return []
         elif isinstance(raw, list):
-            deals = raw
+            offers = raw
         else:
             print("   Dollar General: unknown return type → skipping.")
             return []
 
-        # cap to 50 for API
-        deals = deals[:50]
-        print(f"   Dollar General capped to {len(deals)} deals for upload.")
+        # ✅ normalize to your DB schema
+        normalized: list[dict] = []
+        for idx, off in enumerate(offers[:50], start=1):
+            name = (
+                off.get("name")
+                or off.get("title")
+                or off.get("description")
+                or f"Dollar General deal #{idx}"
+            )
+            price = off.get("price_text") or None
+            discount = off.get("sale_story") or None
 
-        # normalize: force store + name
-        deals = _normalize_deals(
-            deals,
-            default_store="Dollar General",
-            fallback_name_prefix="Dollar General deal",
-        )
-        return deals
+            # turn weird DG discount strings into badge-y text
+            if discount:
+                discount = discount.upper()
+
+            normalized.append({
+                "store_name": "Dollar General",
+                "product_name": name[:500],
+                "price": price,
+                "original_price": None,
+                "discount": discount,
+                "category": ", ".join(off.get("categories", [])) if off.get("categories") else None,
+                "description": off.get("description"),
+                "image_url": off.get("image_url"),
+                "deal_url": off.get("item_web_url"),
+                "valid_from": off.get("valid_from"),
+                "valid_until": off.get("valid_to"),
+            })
+
+        print(f"   Dollar General normalized to {len(normalized)} deals.")
+        return normalized
 
     except Exception as e:
         print(f"   ❌ Dollar General error: {e}")
