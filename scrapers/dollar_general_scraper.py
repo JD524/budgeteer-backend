@@ -30,7 +30,7 @@ DG_FLIPP_ACCESS_TOKEN = os.getenv(
 
 DG_FALLBACK_PUBLICATION_ID = os.getenv(
     "DG_FLIPP_PUBLICATION_ID",
-    "7519222",   # the one you captured that returns ~319 items
+    "7534096",   # the one you captured that returns ~319 items
 )
 
 DG_ID_FILE = Path(__file__).parent / "dg_publication_id.txt"
